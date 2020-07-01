@@ -1,0 +1,1 @@
+let some_func = (k, l, m) => k + l + m;
