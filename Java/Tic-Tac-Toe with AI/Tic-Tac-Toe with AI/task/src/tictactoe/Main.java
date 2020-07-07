@@ -18,7 +18,7 @@ public class Main {
                 // Get players
                 String[] players = inputCommand.split(" ");
                 Player playerOne = PlayerFactory.getPlayer(PlayerLevel.valueOf(players[1].toUpperCase()), 1);
-                Player playerTwo = PlayerFactory.getPlayer(PlayerLevel.valueOf(players[2].toUpperCase()), 0);
+                Player playerTwo = PlayerFactory.getPlayer(PlayerLevel.valueOf(players[2].toUpperCase()), -1);
 
                 // Start the game
                 letsPlayTicTacToe(board, playerOne, playerTwo);
@@ -114,6 +114,19 @@ abstract class AbstractPlayer implements Player {
         this.makeMove(board);
     }
     protected abstract void makeMove(Board board);
+
+    protected Coordinates getDesiredCoordinates(Board tempBoard, GameStates desiredState, int choice) {
+        for (Coordinates coordinates : tempBoard.getAvailableCellCoordinates()) {
+            tempBoard.tryMarking(coordinates, choice);
+            GameStates state = tempBoard.processState();
+            if (desiredState == state) {
+                tempBoard.unMarkPosition(coordinates);
+                return coordinates;
+            }
+            tempBoard.unMarkPosition(coordinates);
+        }
+        return null;
+    }
 }
 
 class PlayerFactory {
@@ -208,14 +221,14 @@ class MediumPlayer extends EasyPlayer {
     @Override
     public void makeMove(Board board) {
         Board tempBoard = new Board(board.getBoard());
-        GameStates canWin = GameStates.values()[getChoice()];
+        GameStates canWin = GameStates.getStateFromScore(getChoice());
         //Check for winning state
         Coordinates winningCoordinates = getDesiredCoordinates(tempBoard, canWin, getChoice());
         if (winningCoordinates == null) {
             //Check for opponent winning state
             tempBoard = new Board(board.getBoard());
-            int choice = Math.abs(getChoice() - 1);
-            Coordinates drawCoordinates = getDesiredCoordinates(tempBoard, GameStates.values()[choice], choice);
+
+            Coordinates drawCoordinates = getDesiredCoordinates(tempBoard, GameStates.getStateFromScore(-getChoice()), -getChoice());
             // Make a random move
             if (drawCoordinates == null) {
                 super.makeMove(board);
@@ -227,23 +240,107 @@ class MediumPlayer extends EasyPlayer {
         }
     }
 
-    private Coordinates getDesiredCoordinates(Board tempBoard, GameStates desiredState, int choice) {
-        for (Coordinates coordinates : tempBoard.getAvailableCellCoordinates()) {
-            tempBoard.tryMarking(coordinates, choice);
-            GameStates state = tempBoard.processState();
-            if (desiredState == state) {
-                tempBoard.unMarkPosition(coordinates);
-                return coordinates;
-            }
-            tempBoard.unMarkPosition(coordinates);
-        }
-        return null;
-    }
+
 }
 
-class HardPlayer extends MediumPlayer {
+class HardPlayer extends EasyPlayer {
     public HardPlayer(int choice, PlayerLevel level) {
         super(choice, level);
+    }
+    Coordinates[] forDiagonalArr = {new Coordinates(2,2), new Coordinates(1,3), new Coordinates(3,1)};
+    Coordinates[] backDiagonalArr = {new Coordinates(1,1), new Coordinates(2,2),new Coordinates(3, 3)};
+    Set<Coordinates> forwardDiagonalCoordinates = new HashSet<>(Arrays.asList(forDiagonalArr));
+    Set<Coordinates> backwardDiagonalCoordinates = new HashSet<>(Arrays.asList(backDiagonalArr));
+    @Override
+    public void makeMove(Board board) {
+        Board tempBoard = new Board(board.getBoard());
+        GameStates canWin = GameStates.getStateFromScore(getChoice());
+        //Check for winning state
+        Coordinates winningCoordinates = getDesiredCoordinates(tempBoard, canWin, getChoice());
+        if (winningCoordinates == null) {
+            //Check for opponent winning state
+            tempBoard = new Board(board.getBoard());
+            Coordinates drawCoordinates = getDesiredCoordinates(tempBoard, GameStates.getStateFromScore(-getChoice()), -getChoice());
+            // Make a random move
+            if (drawCoordinates == null) {
+                Coordinates bestCoordinates = analyze(tempBoard, canWin, getChoice());
+                board.markPosition(bestCoordinates, getChoice());
+            } else {
+                board.markPosition(drawCoordinates, getChoice());
+            }
+        } else {
+            board.markPosition(winningCoordinates, getChoice());
+        }
+    }
+
+    private Coordinates analyze(Board tempBoard, GameStates winState, int choice) {
+        Coordinates rc = null;
+        Coordinates cc = null;
+        Coordinates fdc = null;
+        Coordinates bdc = null;
+        Coordinates bestCoordinates = null;
+        boolean rowWin = false;
+        boolean columnWin = false;
+        boolean diagonalWin = false;
+
+        // Evaluate for each available empty cell
+        for (Coordinates coordinates : tempBoard.getAvailableCellCoordinates()) {
+            tempBoard.tryMarking(coordinates, choice);
+            // Check for Row Win
+            GameStates rowWinState = tempBoard.processRows();
+            if (rowWinState == winState) {
+                rowWin = true;
+                rc = coordinates;
+            }
+            // Check for column win
+            GameStates columnWinState = tempBoard.processColumns();
+            if (columnWinState == winState) {
+                columnWin = true;
+                cc = coordinates;
+            }
+
+            // Check for diagonal win
+            if (forwardDiagonalCoordinates.contains(coordinates)) {
+                GameStates diagonalWinState = tempBoard.processDiagonal();
+
+                if (diagonalWinState == winState) {
+                    diagonalWin = true;
+                    fdc = coordinates;
+                }
+            }
+            if (backwardDiagonalCoordinates.contains(coordinates)) {
+                GameStates diagonalWinState = tempBoard.processDiagonal();
+
+                if (diagonalWinState == winState) {
+                    diagonalWin = true;
+                    bdc = coordinates;
+                }
+            }
+            if (rowWin && columnWin && diagonalWin) {
+                break;
+            }
+            // Add a valid empty cell available to avoid null
+            bestCoordinates = coordinates;
+        }
+        // Unmark all the rough markings
+        for (Coordinates coordinates : tempBoard.getAvailableCellCoordinates()) {
+            tempBoard.unMarkPosition(coordinates);
+        }
+        // Check for the best coordinate to move
+        if (rowWin) {
+            bestCoordinates = rc;
+        }
+        if (columnWin) {
+            bestCoordinates = cc;
+        }
+        if (diagonalWin) {
+            if (bdc == null) {
+                bestCoordinates = fdc;
+            } else {
+                bestCoordinates = bdc;
+            }
+        }
+        return bestCoordinates;
     }
 }
 
@@ -252,19 +349,34 @@ enum PlayerLevel {
 }
 
 enum GameStates {
-    O_WINS ("O wins"),
-    X_WINS ("X wins"),
-    GAME_NOT_FINISHED ("Game not finished"),
-    DRAW ("Draw"),
-    IMPOSSIBLE ("Impossible");
+    O_WINS ("O wins", -1),
+    X_WINS ("X wins", 1),
+    GAME_NOT_FINISHED ("Game not finished", 2),
+    DRAW ("Draw", 3),
+    IMPOSSIBLE ("Impossible", 4);
 
     private final String value;
-    GameStates(String value) {
+    private final int score;
+
+    GameStates(String value, int score) {
         this.value = value;
+        this.score = score;
     }
 
     public String getValue() {
         return value;
+    }
+
+    public int getScore() {
+        return score;
+    }
+    public static GameStates getStateFromScore(int score) {
+        for (GameStates s : GameStates.values()) {
+            if (s.getScore() == score) {
+                return s;
+            }
+        }
+        return null;
     }
 }
 
@@ -276,11 +388,12 @@ class Board {
     public static final String O_ = "O ";
     public static final String EMPTY = "_ ";
     public static final int SIZE = 3;
+    public static final int FINAL_SCORE = 3;
 
     private final Integer[][] board;
-    private final Set<Coordinates> availableCellCoordinates = new HashSet<>();
+    private final Set<Coordinates> availableCellCoordinates = new LinkedHashSet<>();
     Board() {
-        this.board = new Integer[][]{{-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}};
+        this.board = new Integer[][]{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
         for (int i = 1; i <= SIZE; i++) {
             for (int j = 1; j <= SIZE; j++) {
                 availableCellCoordinates.add(new Coordinates(i,j));
@@ -292,7 +405,7 @@ class Board {
         this.board = board;
         for (int i = 0; i < SIZE; i++) {
             for (int j = 0; j < SIZE; j++) {
-                if (board[i][j] == -1) {
+                if (board[i][j] == 0) {
                     availableCellCoordinates.add(new Coordinates(j+1, SIZE - i));
                 }
             }
@@ -315,7 +428,7 @@ class Board {
                 int value = board[i][j];
                 if(value == 1){
                     System.out.print(X_);
-                } else if (value == 0) {
+                } else if (value == -1) {
                     System.out.print(O_);
                 } else {
                     System.out.print(EMPTY);
@@ -340,7 +453,7 @@ class Board {
     }
 
     public boolean isCellAvailable(int x, int y) {
-        return board[SIZE - y][x - 1] == -1;
+        return board[SIZE - y][x - 1] == 0;
     }
 
     public GameStates processState() {
@@ -364,55 +477,55 @@ class Board {
         return state;
     }
 
-    private GameStates processDiagonal() {
+    public GameStates processDiagonal() {
         GameStates state = null;
         int sum = 0;
         for (int i = 0; i < SIZE; i++) {
-            if (board[i][i] == -1) {
-                sum = -1;
+            if (board[i][i] == 0) {
+                sum = 0;
                 break;
             }
             sum += board[i][i];
         }
-        if (sum == 0) {
+        if (sum == -FINAL_SCORE) {
             state = GameStates.O_WINS;
-        }else if (sum == SIZE) {
+        }else if (sum == FINAL_SCORE) {
             state = GameStates.X_WINS;
         } else {
             sum = 0;
             for (int i = 0,j = SIZE - 1; i < SIZE && j >= 0;) {
                 Integer value = board[i++][j--];
-                if (value == -1) {
+                if (value == 0) {
                     return null;
                 }
                 sum += value;
             }
-            if (sum == 0) {
+            if (sum == -FINAL_SCORE) {
                 state = GameStates.O_WINS;
-            }else if (sum == SIZE) {
+            }else if (sum == FINAL_SCORE) {
                 state = GameStates.X_WINS;
             }
         }
         return state;
     }
 
-    private GameStates processColumns() {
+    public GameStates processColumns() {
         GameStates state = null;
         boolean xWon = false;
         boolean oWon = false;
         for (int j = 0; j < SIZE; j++) {
             int sum = 0;
             for (int i = 0; i < SIZE; i++) {
-                if (board[i][j] == -1) {
-                    sum = -1;
+                if (board[i][j] == 0) {
+                    sum = 0;
                     break;
                 }
                 sum += board[i][j];
             }
-            if (sum == SIZE) {
+            if (sum == FINAL_SCORE) {
                 xWon = true;
                 state = GameStates.X_WINS;
-            } else if (sum == 0) {
+            } else if (sum == -FINAL_SCORE) {
                 oWon = true;
                 state = GameStates.O_WINS;
             }
@@ -423,23 +536,23 @@ class Board {
         return state;
     }
 
-    private GameStates processRows() {
+    public GameStates processRows() {
         GameStates state = null;
         boolean xWon = false;
         boolean oWon = false;
         for (int i = 0; i < SIZE; i++) {
             int sum = 0;
             for (int j = 0; j < SIZE; j++) {
-                if (board[i][j] == -1) {
-                    sum = -1;
+                if (board[i][j] == 0) {
+                    sum = 0;
                     break;
                 }
                 sum += board[i][j];
             }
-            if (sum == SIZE) {
+            if (sum == FINAL_SCORE) {
                 state = GameStates.X_WINS;
                 xWon = true;
-            } else if (sum == 0) {
+            } else if (sum == -FINAL_SCORE) {
                 state = GameStates.O_WINS;
                 oWon = true;
             }
@@ -451,6 +564,6 @@ class Board {
     }
 
     public void unMarkPosition(Coordinates coordinates) {
-        board[SIZE - coordinates.getY()][coordinates.getX() - 1] = -1;
+        board[SIZE - coordinates.getY()][coordinates.getX() - 1] = 0;
     }
 }
